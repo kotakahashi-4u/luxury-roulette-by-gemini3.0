@@ -94,6 +94,13 @@
                 <i data-lucide="settings" class="w-6 h-6"></i> 設定
             </h2>
             
+            <!-- Reset Button (New) -->
+            <div class="mb-4 text-right">
+                <button id="resetStorageBtn" class="text-xs text-slate-400 hover:text-red-400 underline">
+                    初期設定に戻す
+                </button>
+            </div>
+
             <div id="segmentsList" class="space-y-4">
                 <!-- Segments will be injected here via JS -->
             </div>
@@ -300,20 +307,58 @@
             }
         }
 
+        // --- Storage Logic ---
+        const STORAGE_KEY = 'grand_roulette_settings_v1';
+
+        function saveToStorage(data) {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                console.log('Settings saved');
+            } catch (e) {
+                console.warn('Failed to save settings:', e);
+            }
+        }
+
+        function loadFromStorage() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                return saved ? JSON.parse(saved) : null;
+            } catch (e) {
+                console.warn('Failed to load settings:', e);
+                return null;
+            }
+        }
+
+        function clearStorage() {
+            try {
+                localStorage.removeItem(STORAGE_KEY);
+                location.reload(); // Simple reload to reset state
+            } catch (e) {
+                console.warn('Failed to clear storage:', e);
+            }
+        }
+
+
         // --- Main App Logic ---
         const soundFX = new SoundFX();
         const confetti = new ConfettiSystem('confettiCanvas');
         
+        // Initial Defaults
+        const defaultSegments = [
+            { id: 1, text: '特賞: 旅行券', weight: 1, color: '#FFD700', textColor: '#000000' },
+            { id: 2, text: '和牛ステーキ', weight: 3, color: '#C0392B', textColor: '#FFFFFF' },
+            { id: 3, text: 'アマギフ 5k', weight: 5, color: '#8E44AD', textColor: '#FFFFFF' },
+            { id: 4, text: 'お菓子詰め合わせ', weight: 10, color: '#27AE60', textColor: '#FFFFFF' },
+            { id: 5, text: 'ハズレ', weight: 20, color: '#2C3E50', textColor: '#FFFFFF' },
+            { id: 6, text: 'もう一回', weight: 5, color: '#2980B9', textColor: '#FFFFFF' },
+        ];
+
+        // Load or Default
+        const initialSegments = loadFromStorage() || defaultSegments;
+
         // Initial State
         let state = {
-            segments: [
-                { id: 1, text: '特賞: 旅行券', weight: 1, color: '#FFD700', textColor: '#000000' },
-                { id: 2, text: '和牛ステーキ', weight: 3, color: '#C0392B', textColor: '#FFFFFF' },
-                { id: 3, text: 'アマギフ 5k', weight: 5, color: '#8E44AD', textColor: '#FFFFFF' },
-                { id: 4, text: 'お菓子詰め合わせ', weight: 10, color: '#27AE60', textColor: '#FFFFFF' },
-                { id: 5, text: 'ハズレ', weight: 20, color: '#2C3E50', textColor: '#FFFFFF' },
-                { id: 6, text: 'もう一回', weight: 5, color: '#2980B9', textColor: '#FFFFFF' },
-            ],
+            segments: initialSegments,
             isSpinning: false,
             rotation: 0,
             soundEnabled: true,
@@ -335,7 +380,7 @@
         const modalCloseActionBtn = document.getElementById('modalCloseActionBtn');
         const modalOverlay = document.getElementById('modalOverlay');
         const gameTitle = document.getElementById('gameTitle');
-        const settingsIcon = settingsToggleBtn.querySelector('i');
+        const resetStorageBtn = document.getElementById('resetStorageBtn');
 
         // Constants
         const CANVAS_SIZE = 600;
@@ -355,12 +400,6 @@
 
             const totalWeight = state.segments.reduce((acc, seg) => acc + parseInt(seg.weight), 0);
             let currentAngle = 0;
-
-            // Draw Outer Glow (Static relative to wheel or spinning? Let's make it spin with wheel for easier logic, or separate. 
-            // In React version we rotated the canvas CSS. Here let's do the same for performance and simplicity.)
-            // Actually, in React version: canvas transform rotates. So drawing is static "0 degree" state.
-            // Let's revert the context rotation and rely on CSS rotation for the canvas element! 
-            // It is much smoother and simpler.
             
             ctx.restore(); // Undo the context rotation, we will rotate the HTML element.
 
@@ -472,11 +511,9 @@
             if (seg) {
                 seg[field] = value;
                 drawWheel();
-                // If it's weight, we need to re-render the list to update the label number
+                saveToStorage(state.segments); // Save!
+                
                 if (field === 'weight') {
-                     // Optimization: just update label text instead of full re-render? 
-                     // For simplicity, let's keep it simple. But to avoid losing focus, we should assume React-like binding isn't here.
-                     // The input value updates automatically. The label text needs manual update.
                      const label = document.querySelector(`input[data-id="${id}"].seg-weight`).previousElementSibling;
                      label.textContent = `比率 (確率): ${value}`;
                 }
@@ -488,6 +525,7 @@
             state.segments.push({ id: newId, text: '新規項目', weight: 1, color: '#bdc3c7', textColor: '#000' });
             renderSettings();
             drawWheel();
+            saveToStorage(state.segments); // Save!
         }
 
         function removeSegment(id) {
@@ -495,6 +533,7 @@
             state.segments = state.segments.filter(s => s.id !== id);
             renderSettings();
             drawWheel();
+            saveToStorage(state.segments); // Save!
         }
 
         function toggleSettings() {
@@ -654,6 +693,11 @@
         soundToggleBtn.addEventListener('click', toggleSound);
         addSegmentBtn.addEventListener('click', addSegment);
         spinBtn.addEventListener('click', spin);
+        resetStorageBtn.addEventListener('click', () => {
+            if(confirm('設定をすべてリセットしますか？')) {
+                clearStorage();
+            }
+        });
         
         closeModalBtn.addEventListener('click', closeWinnerModal);
         modalCloseActionBtn.addEventListener('click', closeWinnerModal);
