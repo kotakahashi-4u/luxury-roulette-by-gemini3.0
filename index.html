@@ -338,22 +338,137 @@
             }
         }
 
+        // --- Color Utils (HSL support for dynamic generation) ---
+        function hexToHsl(hex) {
+            let r = 0, g = 0, b = 0;
+            if (hex.length === 4) {
+                r = "0x" + hex[1] + hex[1];
+                g = "0x" + hex[2] + hex[2];
+                b = "0x" + hex[3] + hex[3];
+            } else if (hex.length === 7) {
+                r = "0x" + hex[1] + hex[2];
+                g = "0x" + hex[3] + hex[4];
+                b = "0x" + hex[5] + hex[6];
+            }
+            r /= 255;
+            g /= 255;
+            b /= 255;
+            let cmin = Math.min(r,g,b), cmax = Math.max(r,g,b), delta = cmax - cmin;
+            let h = 0, s = 0, l = 0;
+            
+            if (delta == 0) h = 0;
+            else if (cmax == r) h = ((g - b) / delta) % 6;
+            else if (cmax == g) h = (b - r) / delta + 2;
+            else h = (r - g) / delta + 4;
+            h = Math.round(h * 60);
+            if (h < 0) h += 360;
+            l = (cmax + cmin) / 2;
+            s = delta == 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+            s = +(s * 100).toFixed(1);
+            l = +(l * 100).toFixed(1);
+            return { h, s, l };
+        }
+
+        function hslToHex(h, s, l) {
+            s /= 100;
+            l /= 100;
+            let c = (1 - Math.abs(2 * l - 1)) * s,
+                x = c * (1 - Math.abs(((h / 60) % 2) - 1)),
+                m = l - c / 2,
+                r = 0, g = 0, b = 0;
+            if (0 <= h && h < 60) { r = c; g = x; b = 0; }
+            else if (60 <= h && h < 120) { r = x; g = c; b = 0; }
+            else if (120 <= h && h < 180) { r = 0; g = c; b = x; }
+            else if (180 <= h && h < 240) { r = 0; g = x; b = c; }
+            else if (240 <= h && h < 300) { r = x; g = 0; b = c; }
+            else if (300 <= h && h < 360) { r = c; g = 0; b = x; }
+            r = Math.round((r + m) * 255).toString(16);
+            g = Math.round((g + m) * 255).toString(16);
+            b = Math.round((b + m) * 255).toString(16);
+            if (r.length == 1) r = "0" + r;
+            if (g.length == 1) g = "0" + g;
+            if (b.length == 1) b = "0" + b;
+            return "#" + r + g + b;
+        }
+
         // --- Color Palette System ---
-        // Refined palettes inspired by design tools
+        // プライマリカラー(メイン)を先頭に配置
+        // 色数を増やし、順番に意味を持たせた
         const COLOR_PALETTES = [
-            { name: "ポップ & キュート", colors: ["#FF6B6B", "#FFD93D", "#6BCB77", "#4D96FF", "#FF9F45", "#F78FB3"] },
-            { name: "北欧ナチュラル", colors: ["#8D9F87", "#D4CBB6", "#E39E5C", "#A64B2A", "#5F4B3B", "#CCD5AE"] },
-            { name: "アーバン・シック", colors: ["#2C3E50", "#E74C3C", "#ECF0F1", "#3498DB", "#F39C12", "#95A5A6"] },
-            { name: "和の伝統色 (雅)", colors: ["#D75455", "#E5B350", "#6A846E", "#594F4F", "#8C708D", "#F2EBBF"] },
-            { name: "ドリーミーパステル", colors: ["#FFB7B2", "#FFDAC1", "#E2F0CB", "#B5EAD7", "#C7CEEA", "#F6EAC2"] },
-            { name: "フレッシュフルーツ", colors: ["#FF5E0E", "#F9CE00", "#76B900", "#00A4CC", "#F2385A", "#E9F1DF"] },
-            { name: "オーシャンブルー", colors: ["#05445E", "#189AB4", "#75E6DA", "#D4F1F4", "#006E90", "#A8D8EA"] },
-            { name: "エレガントローズ", colors: ["#773344", "#E3B5A4", "#F5E9E2", "#0B0014", "#D44D5C", "#BFB5B2"] },
-            { name: "レトロモダン", colors: ["#E63946", "#F1FAEE", "#A8DADC", "#457B9D", "#1D3557", "#2A9D8F"] },
-            { name: "アースカラー", colors: ["#606c38", "#283618", "#fefae0", "#dda15e", "#bc6c25", "#A3B18A"] },
-            { name: "ヴィンテージサーカス", colors: ["#420039", "#93003a", "#ff4f00", "#ffaa00", "#ff0010", "#d6d6d6"] },
-            { name: "春の訪れ", colors: ["#ff9a9e", "#fad0c4", "#ffecd2", "#fcb69f", "#a18cd1", "#fbc2eb"] }
+            { 
+                name: "ポップ & キュート", 
+                colors: ["#FF6B6B", "#FFD93D", "#4D96FF", "#6BCB77", "#F78FB3", "#FF9F45", "#54A0FF", "#00D2D3", "#5F27CD", "#FF6B6B"] 
+            },
+            { 
+                name: "北欧ナチュラル", 
+                colors: ["#E39E5C", "#A64B2A", "#8D9F87", "#5F4B3B", "#D4CBB6", "#CCD5AE", "#FAEDCD", "#D4A373", "#B5838D", "#6B705C"] 
+            },
+            { 
+                name: "アーバン・シック", 
+                colors: ["#E74C3C", "#3498DB", "#F39C12", "#2C3E50", "#95A5A6", "#1ABC9C", "#8E44AD", "#34495E", "#D35400", "#7F8C8D"] 
+            },
+            { 
+                name: "和の伝統色 (雅)", 
+                colors: ["#D75455", "#E5B350", "#2B5F75", "#6A846E", "#8C708D", "#F2EBBF", "#B91E34", "#E18B3D", "#644686", "#9C8E7F"] 
+            },
+            { 
+                name: "ドリーミーパステル", 
+                colors: ["#FFB7B2", "#B5EAD7", "#C7CEEA", "#FFDAC1", "#E2F0CB", "#F6EAC2", "#FF9AA2", "#E0BBE4", "#957DAD", "#D291BC"] 
+            },
+            { 
+                name: "フレッシュフルーツ", 
+                colors: ["#FF5E0E", "#76B900", "#00A4CC", "#F9CE00", "#F2385A", "#E9F1DF", "#88D8B0", "#FFCC5C", "#FF6F69", "#96CEB4"] 
+            },
+            { 
+                name: "オーシャンブルー", 
+                colors: ["#006E90", "#189AB4", "#05445E", "#75E6DA", "#D4F1F4", "#A8D8EA", "#2980B9", "#3498DB", "#5DADE2", "#AED6F1"] 
+            },
+            { 
+                name: "レトロモダン", 
+                colors: ["#E63946", "#1D3557", "#457B9D", "#A8DADC", "#F1FAEE", "#2A9D8F", "#264653", "#E9C46A", "#F4A261", "#E76F51"] 
+            }
         ];
+
+        // 枠数に合わせてパレットを拡張・生成する関数
+        // ループしても「同じ色」に見えないようにバリエーションを生成
+        function getDynamicColors(paletteColors, count) {
+            let result = [];
+            const baseLen = paletteColors.length;
+
+            for (let i = 0; i < count; i++) {
+                // 基本パレットの色を取得
+                let hex = paletteColors[i % baseLen];
+                
+                // ループ回数
+                let loop = Math.floor(i / baseLen);
+
+                if (loop > 0) {
+                    // 2周目以降は色を加工して「違う色」にする
+                    let hsl = hexToHsl(hex);
+                    
+                    // ロジック:
+                    // 1. 色相(H)を少しずらす (隣り合う色と被らないように)
+                    // 2. 輝度(L)や彩度(S)を変えてトーンを変える
+                    
+                    // 奇数周回は明るく、偶数周回は暗くするなど変化をつける
+                    if (loop % 2 === 1) {
+                        hsl.l = Math.min(90, hsl.l + 15); // 明るく
+                        hsl.s = Math.max(20, hsl.s - 10); // 彩度落とす
+                    } else {
+                        hsl.l = Math.max(20, hsl.l - 15); // 暗く
+                        hsl.s = Math.min(100, hsl.s + 10); // 彩度上げる
+                    }
+                    
+                    // 色相を微調整 (ループごとにずらす)
+                    hsl.h = (hsl.h + (loop * 15)) % 360;
+
+                    hex = hslToHex(hsl.h, hsl.s, hsl.l);
+                }
+                
+                result.push(hex);
+            }
+            return result;
+        }
 
         // Helper to check brightness and return black or white text
         function getContrastColor(hex) {
@@ -653,11 +768,13 @@
         function applyRandomPalette() {
             // Pick a random palette
             const palette = COLOR_PALETTES[Math.floor(Math.random() * COLOR_PALETTES.length)];
-            const colors = palette.colors;
+            
+            // 枠数に応じて色を生成 (足りなければバリエーション生成)
+            const generatedColors = getDynamicColors(palette.colors, state.segments.length);
             
             // Apply to all segments sequentially
             state.segments.forEach((seg, index) => {
-                const color = colors[index % colors.length];
+                const color = generatedColors[index];
                 seg.color = color;
                 seg.textColor = getContrastColor(color);
             });
