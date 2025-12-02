@@ -61,8 +61,14 @@
             background: #64748b; 
         }
 
-        /* Hide logic until loaded */
-        [v-cloak] { display: none; }
+        /* Checkbox Style */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #eab308;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #eab308;
+        }
     </style>
 </head>
 <body class="bg-slate-900 text-white min-h-screen flex flex-col relative overflow-hidden">
@@ -94,11 +100,24 @@
                 <i data-lucide="settings" class="w-6 h-6"></i> 設定
             </h2>
             
-            <!-- Reset Button (New) -->
-            <div class="mb-4 text-right">
+            <!-- Reset Button -->
+            <div class="mb-4 flex justify-between items-center">
+                 <span class="text-sm text-slate-400">カスタマイズ</span>
                 <button id="resetStorageBtn" class="text-xs text-slate-400 hover:text-red-400 underline">
                     初期設定に戻す
                 </button>
+            </div>
+
+            <!-- Shuffle Toggle -->
+            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-sm mb-4 flex items-center justify-between">
+                <div>
+                    <div class="font-bold text-sm text-white">項目を散らばらせる</div>
+                    <div class="text-xs text-slate-400">比率に応じて分割・シャッフルします</div>
+                </div>
+                <div class="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
+                    <input type="checkbox" name="toggle" id="shuffleToggle" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer border-slate-600 transition-all duration-300 left-0"/>
+                    <label for="shuffleToggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-slate-700 cursor-pointer border border-slate-600"></label>
+                </div>
             </div>
 
             <div id="segmentsList" class="space-y-4">
@@ -108,6 +127,8 @@
             <button id="addSegmentBtn" class="w-full mt-6 py-3 border-2 border-dashed border-slate-600 rounded-xl text-slate-400 hover:border-yellow-500 hover:text-yellow-500 transition-colors flex items-center justify-center gap-2 font-bold">
                 <i data-lucide="plus" class="w-5 h-5"></i> 項目を追加
             </button>
+            
+            <div class="h-20"></div> <!-- Spacer -->
         </div>
     </div>
 
@@ -308,12 +329,16 @@
         }
 
         // --- Storage Logic ---
-        const STORAGE_KEY = 'grand_roulette_settings_v1';
+        const STORAGE_KEY = 'grand_roulette_settings_v2'; // Changed Key due to structure change
 
-        function saveToStorage(data) {
+        function saveToStorage(stateData) {
             try {
+                // Save Segments and Shuffle flag
+                const data = {
+                    segments: stateData.segments,
+                    shuffle: stateData.shuffle
+                };
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-                console.log('Settings saved');
             } catch (e) {
                 console.warn('Failed to save settings:', e);
             }
@@ -322,7 +347,22 @@
         function loadFromStorage() {
             try {
                 const saved = localStorage.getItem(STORAGE_KEY);
-                return saved ? JSON.parse(saved) : null;
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    // Migration check: if it's an array (old version), wrap it
+                    if (Array.isArray(parsed)) {
+                        return { segments: parsed, shuffle: false };
+                    }
+                    return parsed;
+                }
+                
+                // Fallback: check v1 key
+                const savedV1 = localStorage.getItem('grand_roulette_settings_v1');
+                if (savedV1) {
+                    return { segments: JSON.parse(savedV1), shuffle: false };
+                }
+
+                return null;
             } catch (e) {
                 console.warn('Failed to load settings:', e);
                 return null;
@@ -332,12 +372,12 @@
         function clearStorage() {
             try {
                 localStorage.removeItem(STORAGE_KEY);
-                location.reload(); // Simple reload to reset state
+                localStorage.removeItem('grand_roulette_settings_v1');
+                location.reload(); 
             } catch (e) {
                 console.warn('Failed to clear storage:', e);
             }
         }
-
 
         // --- Main App Logic ---
         const soundFX = new SoundFX();
@@ -354,11 +394,16 @@
         ];
 
         // Load or Default
-        const initialSegments = loadFromStorage() || defaultSegments;
+        const loadedData = loadFromStorage();
+        const initialSegments = loadedData ? loadedData.segments : defaultSegments;
+        const initialShuffle = loadedData ? (loadedData.shuffle || false) : false;
 
         // Initial State
         let state = {
             segments: initialSegments,
+            shuffle: initialShuffle,
+            // activeSegments: calculated segments list used for drawing and physics
+            activeSegments: [], 
             isSpinning: false,
             rotation: 0,
             soundEnabled: true,
@@ -381,6 +426,7 @@
         const modalOverlay = document.getElementById('modalOverlay');
         const gameTitle = document.getElementById('gameTitle');
         const resetStorageBtn = document.getElementById('resetStorageBtn');
+        const shuffleToggle = document.getElementById('shuffleToggle');
 
         // Constants
         const CANVAS_SIZE = 600;
@@ -389,40 +435,60 @@
 
         // --- Functions ---
 
+        /**
+         * Recalculates 'activeSegments' based on shuffle mode.
+         * If shuffle is OFF: activeSegments is just a mapped copy of segments.
+         * If shuffle is ON: activeSegments contains (weight) amount of slices for each segment, shuffled.
+         */
+        function recalculateActiveSegments() {
+            if (!state.shuffle) {
+                // Normal Mode
+                state.activeSegments = state.segments.map(s => ({
+                    ...s,
+                    originalId: s.id,
+                    displayWeight: parseInt(s.weight) // Draw based on full weight
+                }));
+            } else {
+                // Shuffle Mode
+                let list = [];
+                state.segments.forEach(seg => {
+                    const count = parseInt(seg.weight);
+                    for(let i=0; i<count; i++) {
+                        list.push({
+                            ...seg,
+                            originalId: seg.id,
+                            displayWeight: 1 // Each slice has weight 1
+                        });
+                    }
+                });
+                
+                // Fisher-Yates Shuffle
+                for (let i = list.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [list[i], list[j]] = [list[j], list[i]];
+                }
+                
+                state.activeSegments = list;
+            }
+        }
+
         function drawWheel() {
             ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
             
-            // Save context for rotation
-            ctx.save();
-            ctx.translate(CENTER, CENTER);
-            ctx.rotate((state.rotation * Math.PI) / 180);
-            ctx.translate(-CENTER, -CENTER);
+            // Apply current rotation to canvas CSS for smooth animation
+            canvas.style.transform = `rotate(${state.rotation}deg)`;
 
-            const totalWeight = state.segments.reduce((acc, seg) => acc + parseInt(seg.weight), 0);
+            // --- Draw Static Elements on Context (Canvas itself is rotated by CSS) ---
+            // Actually, we must draw segments on the canvas. 
+            // The canvas logic here draws segments assuming rotation=0 (upright).
+            // The CSS rotates the whole view.
+
+            const totalDisplayWeight = state.activeSegments.reduce((acc, seg) => acc + seg.displayWeight, 0);
             let currentAngle = 0;
-            
-            ctx.restore(); // Undo the context rotation, we will rotate the HTML element.
 
-            // 1. Draw Outer Decoration (Static on canvas)
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(CENTER, CENTER, RADIUS + 15, 0, Math.PI * 2);
-            ctx.fillStyle = '#1a1a1a';
-            ctx.shadowColor = '#FFD700'; 
-            ctx.shadowBlur = 30;
-            ctx.fill();
-            ctx.restore();
-
-            // 2. Draw Gold Border
-            ctx.beginPath();
-            ctx.arc(CENTER, CENTER, RADIUS + 5, 0, Math.PI * 2);
-            ctx.lineWidth = 10;
-            ctx.strokeStyle = '#D4AF37';
-            ctx.stroke();
-
-            // 3. Draw Segments
-            state.segments.forEach((seg) => {
-                const sliceAngle = (parseInt(seg.weight) / totalWeight) * 2 * Math.PI;
+            // 1. Draw Segments
+            state.activeSegments.forEach((seg) => {
+                const sliceAngle = (seg.displayWeight / totalDisplayWeight) * 2 * Math.PI;
                 
                 // Wedge
                 ctx.beginPath();
@@ -434,21 +500,55 @@
                 ctx.stroke();
 
                 // Text
+                // If shuffled and slice is small (weight 1), text might be crowded. 
+                // Only draw text if slice is big enough or if it's the only way?
+                // For "Shuffle Mode", slices are small. Let's adjust font size or hide text if too small?
+                // Let's try drawing it but maybe smaller if shuffle is on.
+                
                 ctx.save();
                 ctx.translate(CENTER, CENTER);
                 ctx.rotate(currentAngle + sliceAngle / 2);
                 ctx.textAlign = 'right';
                 ctx.fillStyle = seg.textColor;
-                ctx.font = 'bold 24px "Noto Sans JP", sans-serif';
+                
+                // Adjust font based on angle size to prevent overlap
+                const angleDeg = (sliceAngle * 180) / Math.PI;
+                let fontSize = 24;
+                if (angleDeg < 10) fontSize = 12;
+                else if (angleDeg < 20) fontSize = 16;
+                
+                ctx.font = `bold ${fontSize}px "Noto Sans JP", sans-serif`;
                 ctx.shadowColor = 'rgba(0,0,0,0.5)';
                 ctx.shadowBlur = 4;
-                ctx.fillText(seg.text, RADIUS - 40, 8);
+                
+                // Only draw text if it fits reasonably
+                if (angleDeg > 3) {
+                     ctx.fillText(seg.text, RADIUS - 40, fontSize/3);
+                }
+               
                 ctx.restore();
 
                 currentAngle += sliceAngle;
             });
+            
+            // Restore context for static overlays? 
+            // No, ctx is just pixels. We drew the wheel.
+            // Now draw borders/center on top.
 
-            // 4. Inner Center Decoration
+            // 2. Draw Outer Border (This spins with the canvas in CSS mode)
+            ctx.beginPath();
+            ctx.arc(CENTER, CENTER, RADIUS, 0, Math.PI * 2);
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = '#D4AF37'; // Inner gold rim
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.arc(CENTER, CENTER, RADIUS + 5, 0, Math.PI * 2);
+            ctx.lineWidth = 10;
+            ctx.strokeStyle = '#D4AF37'; // Outer gold rim
+            ctx.stroke();
+
+            // 3. Inner Center Decoration
             ctx.beginPath();
             ctx.arc(CENTER, CENTER, 40, 0, Math.PI * 2);
             ctx.fillStyle = '#222';
@@ -461,12 +561,12 @@
             ctx.arc(CENTER, CENTER, 15, 0, Math.PI * 2);
             ctx.fillStyle = '#D4AF37';
             ctx.fill();
-
-            // Apply rotation to canvas element
-            canvas.style.transform = `rotate(${state.rotation}deg)`;
         }
 
         function renderSettings() {
+            // Update Checkbox
+            shuffleToggle.checked = state.shuffle;
+
             segmentsList.innerHTML = '';
             state.segments.forEach((seg, index) => {
                 const div = document.createElement('div');
@@ -500,7 +600,7 @@
             });
             document.querySelectorAll('.seg-delete').forEach(el => {
                 el.addEventListener('click', (e) => {
-                    const id = parseInt(e.currentTarget.dataset.id); // currentTarget to get button, not icon
+                    const id = parseInt(e.currentTarget.dataset.id);
                     removeSegment(id);
                 });
             });
@@ -510,8 +610,9 @@
             const seg = state.segments.find(s => s.id === id);
             if (seg) {
                 seg[field] = value;
+                recalculateActiveSegments();
                 drawWheel();
-                saveToStorage(state.segments); // Save!
+                saveToStorage(state);
                 
                 if (field === 'weight') {
                      const label = document.querySelector(`input[data-id="${id}"].seg-weight`).previousElementSibling;
@@ -524,16 +625,25 @@
             const newId = (state.segments.length > 0 ? Math.max(...state.segments.map(s => s.id)) : 0) + 1;
             state.segments.push({ id: newId, text: '新規項目', weight: 1, color: '#bdc3c7', textColor: '#000' });
             renderSettings();
+            recalculateActiveSegments();
             drawWheel();
-            saveToStorage(state.segments); // Save!
+            saveToStorage(state);
         }
 
         function removeSegment(id) {
             if (state.segments.length <= 2) return;
             state.segments = state.segments.filter(s => s.id !== id);
             renderSettings();
+            recalculateActiveSegments();
             drawWheel();
-            saveToStorage(state.segments); // Save!
+            saveToStorage(state);
+        }
+
+        function toggleShuffle() {
+            state.shuffle = shuffleToggle.checked;
+            recalculateActiveSegments();
+            drawWheel();
+            saveToStorage(state);
         }
 
         function toggleSettings() {
@@ -579,10 +689,9 @@
             spinBtn.textContent = '...';
             gameTitle.classList.add('opacity-50', 'scale-90');
             
-            // Close settings if open
             if(state.showSettings) toggleSettings();
 
-            // Logic
+            // 1. Determine Winning Segment based on pure weight probability
             const totalWeight = state.segments.reduce((acc, seg) => acc + parseInt(seg.weight), 0);
             let random = Math.random() * totalWeight;
             let resultSegment = null;
@@ -595,24 +704,33 @@
                 random -= parseInt(seg.weight);
             }
 
-            // Calculate Angles
+            // 2. Find target slice in activeSegments (drawing list)
+            // If shuffled, there are multiple slices with originalId === resultSegment.id.
+            // Pick one randomly.
+            const targetCandidates = [];
             let angleAccumulator = 0;
-            let targetAngleStart = 0;
-            let targetAngleEnd = 0;
-            
-            for (let seg of state.segments) {
-                const segAngle = (parseInt(seg.weight) / totalWeight) * 360;
-                if (seg.id === resultSegment.id) {
-                    targetAngleStart = angleAccumulator;
-                    targetAngleEnd = angleAccumulator + segAngle;
-                    break;
+            const totalDisplayWeight = state.activeSegments.reduce((acc,s) => acc + s.displayWeight, 0);
+
+            state.activeSegments.forEach(seg => {
+                const segAngle = (seg.displayWeight / totalDisplayWeight) * 360;
+                // Check if this slice belongs to the winner
+                if (seg.originalId === resultSegment.id) {
+                    targetCandidates.push({
+                        start: angleAccumulator,
+                        end: angleAccumulator + segAngle
+                    });
                 }
                 angleAccumulator += segAngle;
-            }
+            });
 
-            const pad = Math.min((targetAngleEnd - targetAngleStart) * 0.2, 5); 
-            const randomOffset = Math.random() * (targetAngleEnd - targetAngleStart - 2 * pad) + pad;
-            const targetAngleWithinWheel = targetAngleStart + randomOffset;
+            // Randomly pick one of the candidate slices
+            const targetSlice = targetCandidates[Math.floor(Math.random() * targetCandidates.length)];
+
+            // 3. Calculate Rotation to land on targetSlice
+            // We want a random point within this slice to land at 270deg (Top)
+            const pad = Math.min((targetSlice.end - targetSlice.start) * 0.2, 5); 
+            const randomOffset = Math.random() * (targetSlice.end - targetSlice.start - 2 * pad) + pad;
+            const targetAngleWithinWheel = targetSlice.start + randomOffset;
 
             const spins = 5;
             const duration = 6000;
@@ -635,15 +753,17 @@
                 // Draw/Rotate
                 canvas.style.transform = `rotate(${state.rotation}deg)`;
 
-                // Sound
+                // Sound Logic
                 const normRot = state.rotation % 360;
                 let pointerAngleInWheel = (270 - normRot) % 360;
                 if (pointerAngleInWheel < 0) pointerAngleInWheel += 360;
 
                 let currentSegIndex = 0;
                 let accum = 0;
-                for(let i=0; i<state.segments.length; i++) {
-                    const w = (parseInt(state.segments[i].weight) / totalWeight) * 360;
+                
+                // Need to match slice index in activeSegments
+                for(let i=0; i<state.activeSegments.length; i++) {
+                    const w = (state.activeSegments[i].displayWeight / totalDisplayWeight) * 360;
                     if (pointerAngleInWheel >= accum && pointerAngleInWheel < accum + w) {
                         currentSegIndex = i;
                         break;
@@ -670,12 +790,10 @@
             state.isSpinning = false;
             soundFX.playWin();
             
-            // Show Winner Modal
             winnerName.textContent = result.text;
             winnerModal.classList.remove('hidden');
             confetti.start();
 
-            // Reset UI
             spinBtn.disabled = false;
             spinBtn.classList.remove('bg-slate-800', 'text-slate-500', 'scale-90', 'cursor-not-allowed', 'opacity-80');
             spinBtn.classList.add('bg-gradient-to-br', 'from-red-600', 'to-red-800', 'text-white', 'hover:scale-110', 'animate-pulse-slow');
@@ -698,6 +816,7 @@
                 clearStorage();
             }
         });
+        shuffleToggle.addEventListener('change', toggleShuffle);
         
         closeModalBtn.addEventListener('click', closeWinnerModal);
         modalCloseActionBtn.addEventListener('click', closeWinnerModal);
@@ -705,13 +824,13 @@
 
         // Resize Canvas Logic
         window.addEventListener('resize', () => {
-             // Redraw if needed (though CSS handles size)
-             // drawWheel(); 
+             // Redraw if needed
         });
 
         // Initialize
         lucide.createIcons();
         renderSettings();
+        recalculateActiveSegments(); // Init active segments
         drawWheel();
         
     </script>
